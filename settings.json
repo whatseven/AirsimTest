@@ -1,0 +1,23 @@
+{
+  "SeeDocsAt": "https://github.com/Microsoft/AirSim/blob/master/docs/settings.md",
+  "SettingsVersion": 1.2,
+  "ClockSpeed": 3,
+  "SubWindows": [
+    {"WindowID": 2, "CameraName": "front_center", "ImageType": 0, "Visible": false}    
+  ],
+  "CameraDefaults": {
+    "Gimbal": {
+      "Stabilization": 0,
+      "Pitch": 0, "Roll": 0, "Yaw": 0
+    }   
+  },
+  "SimMode": "Multirotor",
+
+  "Vehicles": {
+      "drone1": {
+        "VehicleType": "SimpleFlight",
+        "X": 0, "Y": 0, "Z": 0,
+    "Yaw": 180
+      }
+  }
+}
