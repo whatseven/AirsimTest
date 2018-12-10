@@ -149,11 +149,20 @@ class AirsimDemo:
 
     def calculate_camera_to_center(self, v_pos_local):
         direction = self.world_to_local(self.camera_center) - v_pos_local
-        direction_in_camera = np.append(np.asarray(-direction[:2]), direction[2])
+        direction_in_camera = np.asarray([direction[0],direction[1] ,-direction[2]])
         direction_in_camera_norm = direction_in_camera / np.linalg.norm(direction_in_camera)
         pitch = math.asin(direction_in_camera_norm[2])
-        yaw = math.atan(direction_in_camera_norm[1] / direction_in_camera_norm[0])
-        return airsim.to_quaternion(-pitch, 0, yaw)
+
+        if direction_in_camera_norm[1]<0 and direction_in_camera_norm[0]<0:
+            yaw = -math.atan(direction_in_camera_norm[0] / direction_in_camera_norm[1])-math.pi/2
+        elif direction_in_camera_norm[1]>0 and direction_in_camera_norm[0]>0:
+            yaw = math.atan(direction_in_camera_norm[1] / direction_in_camera_norm[0])
+        elif direction_in_camera_norm[1] < 0 and direction_in_camera_norm[0] > 0:
+            yaw = -math.atan(-direction_in_camera_norm[1] / direction_in_camera_norm[0])
+        else:
+            yaw = math.pi/2-math.atan(direction_in_camera_norm[1] / -direction_in_camera_norm[0])
+
+        return [pitch, 0, yaw]
 
     def start(self, v_points, v_index):
         """
@@ -172,7 +181,6 @@ class AirsimDemo:
                                         , SPEED).join()
 
         self.client.hoverAsync().join()
-
         state = self.client.getMultirotorState()
         current_pos = state.kinematics_estimated.position
         log_file("Ready to start", "pos:"
@@ -206,13 +214,15 @@ class AirsimDemo:
             """
             Calculate camera heading
             """
-            current_pos_state = self.client.getMultirotorState().kinematics_estimated.position
-            current_pos_local = np.asarray([current_pos_state.x_val
-                                               , current_pos_state.y_val
-                                               , current_pos_state.z_val])
+            current_pos_state = self.client.getMultirotorState().kinematics_estimated
+            current_pos_local = np.asarray([current_pos_state.position.x_val
+                                               , current_pos_state.position.y_val
+                                               , current_pos_state.position.z_val])
 
             camera_angle = self.calculate_camera_to_center(current_pos_local)
-            self.client.simSetCameraOrientation("", camera_angle)
+            self.client.simSetCameraOrientation(""
+                                                , airsim.to_quaternion(
+                    camera_angle[0],0,camera_angle[2]-airsim.to_eularian_angles(current_pos_state.orientation)[2]))
 
             """
             Generate Image
@@ -221,10 +231,10 @@ class AirsimDemo:
                 airsim.ImageRequest("", airsim.ImageType.Scene)  # scene vision image in png format
             ])
 
-            log_file("Image saved", str(next_index))
 
-            image_filename = os.path.normpath(os.path.join(self.data_dir, str(next_index)) + '.png')
+            image_filename = os.path.normpath(os.path.join(self.data_dir,str(v_index)+"_"+ str(next_index)) + '.png')
             airsim.write_file(image_filename, responses[0].image_data_uint8)
+            log_file("Image saved", str(image_filename))
 
             """
             Report
