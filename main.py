@@ -1,6 +1,7 @@
 import math
 import os
 import time
+from threading import Timer
 
 import Vec3D
 from BezierClass import BezierCurve
@@ -20,6 +21,15 @@ PARAMETERS = (0, 0.5, 1)
 Utils
 """
 
+g_current_velocity_x=0
+g_current_velocity_y=0
+g_current_velocity_z=0
+
+g_current_orientation_pitch=0
+g_current_orientation_roll=0
+g_current_orientation_yaw=0
+
+g_next_duration=0
 
 def log_file(log_type, log_msg):
     print(time.asctime(time.localtime(time.time()))
@@ -87,12 +97,24 @@ def socket_server():
         server.close()
 
 
-def socket_client():
-    pass
-
+def socket_client(s):
+    s.sendall((str(g_current_velocity_x) + "_"
+               + str(g_current_velocity_y) + "_"
+               + str(g_current_velocity_z) + "_"
+               + str(g_current_orientation_pitch) + "_"
+               + str(g_current_orientation_roll) + "_"
+               + str(g_current_orientation_yaw) + "_"
+               + str(g_next_duration)).encode())
+    log_file("Send data", "")
+    global timer
+    timer = Timer(g_next_duration, socket_client,s)
+    timer.start()
 
 class AirsimDemo:
-    def __init__(self):
+    def __init__(self,v_is_connect_simulator):
+
+        self.is_connect_simulator=v_is_connect_simulator
+
         """
         Global control data
         """
@@ -108,7 +130,16 @@ class AirsimDemo:
         gim_raw = ""
         gim_yaw = ""
 
-        self.camera_center = CAMERA_CENTER
+        """
+        Socket
+        """
+        if self.is_connect_simulator:
+            self.s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            self.s.connect((HOST, PORT))
+        else:
+            self.s=None
+
+        self.camera_center=CAMERA_CENTER
 
         """
         File dir
@@ -183,6 +214,7 @@ class AirsimDemo:
         self.client.hoverAsync().join()
         state = self.client.getMultirotorState()
         current_pos = state.kinematics_estimated.position
+
         log_file("Ready to start", "pos:"
                  + str(current_pos.x_val) + "_"
                  + str(current_pos.y_val) + "_"
@@ -211,6 +243,12 @@ class AirsimDemo:
                                             , airsim.DrivetrainType.ForwardOnly
                                             , airsim.YawMode(False,0)).join()
 
+            g_current_velocity_x = next_direction_local_norm[0] * SPEED
+            g_current_velocity_y = next_direction_local_norm[1] * SPEED
+            g_current_velocity_z = next_direction_local_norm[2] * SPEED
+
+            g_next_duration=next_duration
+
             """
             Calculate camera heading
             """
@@ -220,9 +258,26 @@ class AirsimDemo:
                                                , current_pos_state.position.z_val])
 
             camera_angle = self.calculate_camera_to_center(current_pos_local)
+
+            g_current_orientation_pitch = camera_angle[0]
+            g_current_orientation_roll = 0
+            g_current_orientation_yaw = camera_angle[2]-airsim.to_eularian_angles(current_pos_state.orientation)[2]
+
             self.client.simSetCameraOrientation(""
                                                 , airsim.to_quaternion(
-                    camera_angle[0],0,camera_angle[2]-airsim.to_eularian_angles(current_pos_state.orientation)[2]))
+                g_current_orientation_pitch,g_current_orientation_roll,g_current_orientation_yaw))
+
+            """
+            Send data if connect
+            """
+            # x=self.s.send(("velocity_"+str(g_current_velocity_x) + "_"
+            #            + str(g_current_velocity_y) + "_"
+            #            + str(g_current_velocity_z) + "_"
+            #            + str(g_current_orientation_pitch) + "_"
+            #            + str(g_current_orientation_roll) + "_"
+            #            + str(g_current_orientation_yaw) + "_"
+            #            + str(g_next_duration)).encode())
+            log_file("Send data", "")
 
             """
             Generate Image
@@ -243,7 +298,7 @@ class AirsimDemo:
                                 + str(next_direction_local_norm[1] * SPEED) + "_"
                                 + str(next_direction_local_norm[2] * SPEED) + "_"
                                 + str(next_duration) + "_"
-                                + str(image_filename))
+                                + str(image_filename)+"=")
 
             """
             Logging
@@ -271,16 +326,23 @@ class AirsimDemo:
         # that's enough fun for now. let's quit cleanly
         self.client.enableApiControl(False)
 
+        self.s.close()
+
 
 if __name__ == '__main__':
 
     # Client to send the pose data and point
-    # _thread.start_new_thread(socket_client)
+    #_thread.start_new_thread(socket_client)
 
-    # Server to receive current states and position
+
+
+    # timer=Timer(1/FREQUENCY,socket_client,[s])
+    # timer.start()
+
+    #Server to receive current states and position
     # _thread.start_new_thread(socket_server)
 
-    airsim_demo = AirsimDemo()
+    airsim_demo = AirsimDemo(v_is_connect_simulator=False)
 
     for idx, control_point in enumerate(calculate_path(START_POS, END_POS, END_NORM)):
         x, y, z = generateCurvePoint(control_point)

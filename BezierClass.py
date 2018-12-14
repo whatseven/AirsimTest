@@ -1,8 +1,10 @@
 from collections import deque
 
+from ext import SAMPLE_FREQUENCY
+
 
 class BezierCurve:
-    RANGE_STEP = 100
+    RANGE_STEP = SAMPLE_FREQUENCY
 
     def __init__(self):
         self.control_points = []
