@@ -31,9 +31,12 @@ g_current_orientation_yaw=0
 
 g_next_duration=0
 
+g_log_level=["move to","after moving","camera","process"]
+
 def log_file(log_type, log_msg):
-    print(time.asctime(time.localtime(time.time()))
-          + "=====" + log_type + "---:" + log_msg)
+    if log_type in g_log_level:
+        print(time.asctime(time.localtime(time.time()))
+              + "=====" + log_type + "---:" + log_msg)
 
 
 def calculate_path(start_pos, end_pos, end_norm):
@@ -46,10 +49,10 @@ def calculate_path(start_pos, end_pos, end_norm):
     return control_points
 
 
-def generateCurvePoint(v_control_point):
+def generateCurvePoint(v_control_point,v_start_pos):
     curve = BezierCurve()
 
-    points = [Vec3D.Vec3D(START_POS[0], START_POS[1], START_POS[2]),
+    points = [Vec3D.Vec3D(v_start_pos[0], v_start_pos[1], v_start_pos[2]),
               Vec3D.Vec3D(v_control_point[0], v_control_point[1], v_control_point[2]),
               Vec3D.Vec3D(END_POS[0], END_POS[1], END_POS[2])]
 
@@ -72,73 +75,8 @@ def generateCurvePoint(v_control_point):
     # plt.show()
     return x, y, z
 
-
-def socket_server():
-    server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    server.bind((HOST, PORT))
-    server.listen(2)
-    try:
-        while True:
-            conn, add = server.accept()
-            log_file("accept", "")
-            while True:
-                buf = conn.recv(1024).decode()
-                data = buf.split("_")
-                if data[0] == "syncP":
-                    pos_x = data[4]
-                    pos_y = data[5]
-                    pos_z = data[6]
-                    log_file("syncp:", pos_x + "," + pos_y + "," + pos_z)
-                elif data[0] == "syncG":
-                    pass
-
-    except KeyboardInterrupt:
-        print("you have CTRL+C,Now quit")
-        server.close()
-
-
-def socket_client(s):
-    s.sendall((str(g_current_velocity_x) + "_"
-               + str(g_current_velocity_y) + "_"
-               + str(g_current_velocity_z) + "_"
-               + str(g_current_orientation_pitch) + "_"
-               + str(g_current_orientation_roll) + "_"
-               + str(g_current_orientation_yaw) + "_"
-               + str(g_next_duration)).encode())
-    log_file("Send data", "")
-    global timer
-    timer = Timer(g_next_duration, socket_client,s)
-    timer.start()
-
 class AirsimDemo:
-    def __init__(self,v_is_connect_simulator):
-
-        self.is_connect_simulator=v_is_connect_simulator
-
-        """
-        Global control data
-        """
-        pos_pitch = ""
-        pos_roll = ""
-        pos_yaw = ""
-
-        pos_x = ""
-        pos_y = ""
-        pos_z = ""
-
-        gim_pitch = ""
-        gim_raw = ""
-        gim_yaw = ""
-
-        """
-        Socket
-        """
-        if self.is_connect_simulator:
-            self.s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            self.s.connect((HOST, PORT))
-        else:
-            self.s=None
-
+    def __init__(self):
         self.camera_center=CAMERA_CENTER
 
         """
@@ -169,6 +107,9 @@ class AirsimDemo:
 
         self.client.takeoffAsync().join()
 
+    #
+    # Util
+    #
     def world_to_local(self, world_pos):
         pos_diff = DRONE_START_POS
         return np.append((world_pos - pos_diff)[:2], -world_pos[2] + pos_diff[2]) / 100
@@ -195,162 +136,151 @@ class AirsimDemo:
 
         return [pitch, 0, yaw]
 
-    def start(self, v_points, v_index):
-        """
-        Data reporter
-        """
-        try:
-            self.reporter = open(os.path.join(self.reporter_dir, str(v_index) + ".txt"), "w")
-        except Exception as e:
-            print(e)
+    #
+    # control function
+    #
 
-        """
-        Fly to first point
-        """
-        start_pos_local = self.world_to_local(v_points[0])
-        self.client.moveToPositionAsync(start_pos_local[0], start_pos_local[1], start_pos_local[2]
-                                        , SPEED).join()
-
-        self.client.hoverAsync().join()
-        state = self.client.getMultirotorState()
-        current_pos = state.kinematics_estimated.position
-
-        log_file("Ready to start", "pos:"
-                 + str(current_pos.x_val) + "_"
-                 + str(current_pos.y_val) + "_"
-                 + str(current_pos.z_val))
+    def start(self, v_points, v_index,v_id_route):
+        self.prepare_start(v_id_route, v_index, v_points)
 
         """
         Start flying
         """
         next_index = 1
         #Debug
-        d_current_pos=self.world_to_local(v_points[0])
-        d_pos_list=[d_current_pos]
+        #d_current_pos=self.world_to_local(v_points[0])
+        #d_pos_list=[d_current_pos]
         while next_index < v_points.shape[0]:
-            state = self.client.getMultirotorState()
-            current_pos = np.asarray([state.kinematics_estimated.position.x_val
-                                         , state.kinematics_estimated.position.y_val
-                                         , state.kinematics_estimated.position.z_val])
-            log_file("move to:" + str(self.world_to_local(v_points[next_index])), "now:" + str(current_pos))
+            identifier=str(v_id_route)+"_"+str(next_index)
 
-            next_direction_local = self.world_to_local(v_points[next_index]) - current_pos
+            self.move_to_next(next_index, v_points)
 
-            g_current_velocity_x = next_direction_local[0] / SPEED
-            g_current_velocity_y = next_direction_local[1] / SPEED
-            g_current_velocity_z = next_direction_local[2] / SPEED
-            g_next_duration = 1
+            self.calculate_camera(identifier)
 
-            # Debug
-            next_pos=current_pos+g_next_duration*np.asarray([g_current_velocity_x,g_current_velocity_y,g_current_velocity_z])
-            print("expected:"+str(next_pos))
-            print("velocity:"+str(g_current_velocity_x)+"_"+str(g_current_velocity_y)+"_"+str(g_current_velocity_z)+"_")
+            image_filename = self.generate_image(identifier)
 
-            self.client.moveByVelocityAsync(g_current_velocity_x
-                                            , g_current_velocity_y
-                                            , g_current_velocity_z
-                                            , g_next_duration
-                                            , airsim.DrivetrainType.MaxDegreeOfFreedom
-                                            , airsim.YawMode(False,0)).join()
-            # Debug
-            d_current_pos+=np.asarray([g_current_velocity_x,g_current_velocity_y,g_current_velocity_z])
-            d_pos_list.append(d_current_pos)
-            print("After calculate:"+str(d_current_pos))
-            self.client.hoverAsync().join()
-            # self.client.moveToPositionAsync(next_pos[0]
-            #                                 ,next_pos[1]
-            #                                 ,next_pos[2]
-            #                                 ,0.5,60
-            #                                 , airsim.DrivetrainType.ForwardOnly, airsim.YawMode(False,0)
-            # ).join()
-
-            """
-            Calculate camera heading
-            """
-            current_pos_state = self.client.getMultirotorState().kinematics_estimated
-            current_pos_local = np.asarray([current_pos_state.position.x_val
-                                               , current_pos_state.position.y_val
-                                               , current_pos_state.position.z_val])
-            print("now:"+str(current_pos_local))
-            camera_angle = self.calculate_camera_to_center(current_pos_local)
-
-            g_current_orientation_pitch = camera_angle[0]
-            g_current_orientation_roll = 0
-            g_current_orientation_yaw = camera_angle[2]-airsim.to_eularian_angles(current_pos_state.orientation)[2]
-
-            self.client.simSetCameraOrientation(""
-                                                , airsim.to_quaternion(
-                g_current_orientation_pitch,g_current_orientation_roll,g_current_orientation_yaw))
-
-            """
-            Generate Image
-            """
-            responses = self.client.simGetImages([
-                airsim.ImageRequest("", airsim.ImageType.Scene)  # scene vision image in png format
-            ])
-
-
-            image_filename = os.path.normpath(os.path.join(self.data_dir,str(v_index)+"_"+ str(next_index)) + '.png')
-            airsim.write_file(image_filename, responses[0].image_data_uint8)
-            #log_file("Image saved", str(image_filename))
-
-            """
-            Report
-            """
-            self.reporter.write(str(g_current_velocity_x) + "_"
-                                + str(g_current_velocity_y) + "_"
-                                + str(g_current_velocity_z) + "_"
-                                + str(g_next_duration) + "_"
-                                + str(image_filename)+"=")
-
-            """
-            Logging
-            """
-            state = self.client.getMultirotorState()
-            log_file("after moving:", "(" + str(state.kinematics_estimated.position.x_val) + ","
-                     + str(state.kinematics_estimated.position.y_val) + ","
-                     + str(state.kinematics_estimated.position.z_val) + ")"
-                     + "\nvelocity:" + str(g_current_velocity_x) + ","
-                     + str(g_current_velocity_y) + ","
-                     + str(g_current_velocity_z)+"\n"
-                     +"duration:"+str(g_next_duration)
-                     )
+            self.report_and_logging(identifier,image_filename)
             next_index += 1
 
-        if True is False:
-            with open("reporter/data.txt", "r") as f:
-                str_line = f.read()
-                items = str_line.split("=")
-                for item in items:
-                    velocitys = item.split("_")
-                    if len(velocitys) < 3:
-                        break
-                    vx = float(velocitys[0])
-                    vy = float(velocitys[1])
-                    vz = float(velocitys[2])
-                    next_duration = float(velocitys[3])
+            log_file("process",identifier+" done")
 
-                    state = self.client.getMultirotorState()
-                    cur_pos=np.asarray([state.kinematics_estimated.position.x_val
-                                           ,state.kinematics_estimated.position.y_val
-                                           ,state.kinematics_estimated.position.z_val])
-                    expect_pos=cur_pos+np.asarray([vx*next_duration,vy*next_duration,vz*next_duration])
-                    print("expected position:"+str(expect_pos))
-                    self.client.moveByVelocityAsync(vx
-                                                    , vy
-                                                    , vz
-                                                    , next_duration
-                                                    , airsim.DrivetrainType.MaxDegreeOfFreedom
-                                                    , airsim.YawMode(False, 0)).join()
-                    state = self.client.getMultirotorState()
-                    cur_pos = np.asarray([state.kinematics_estimated.position.x_val
-                                             , state.kinematics_estimated.position.y_val
-                                             , state.kinematics_estimated.position.z_val])
-                    print("now position:" + str(cur_pos))
         state = self.client.getMultirotorState()
 
         self.reporter.close()
         self.reporter = None
+
+    def report_and_logging(self,v_identifier, image_filename):
+        """
+        Report
+        """
+        self.reporter.write(v_identifier + "=" + str(g_current_velocity_x) + "="
+                            + str(g_current_velocity_y) + "="
+                            + str(g_current_velocity_z) + "="
+                            + str(g_next_duration) + "="
+                            + str(image_filename) + "\n")
+        """
+        Logging
+        """
+        state = self.client.getMultirotorState()
+        log_file("position", "after moving:(" + str(state.kinematics_estimated.position.x_val) + ","
+                 + str(state.kinematics_estimated.position.y_val) + ","
+                 + str(state.kinematics_estimated.position.z_val) + ")"
+                 + "\nvelocity:" + str(g_current_velocity_x) + ","
+                 + str(g_current_velocity_y) + ","
+                 + str(g_current_velocity_z) + "\n"
+                 + "duration:" + str(g_next_duration)
+                 )
+
+    def generate_image(self, v_identifier):
+        """
+        Generate Image
+        """
+        responses = self.client.simGetImages([
+            airsim.ImageRequest("front_center", airsim.ImageType.Scene)  # scene vision image in png format
+        ])
+        image_filename = os.path.normpath(os.path.join(self.data_dir, str(v_identifier)) + '.png')
+        airsim.write_file(image_filename, responses[0].image_data_uint8)
+        # log_file("Image saved", str(image_filename))
+        return image_filename
+
+    def calculate_camera(self,v_identifier):
+        """
+        Calculate camera heading
+        """
+        current_pos_state = self.client.getMultirotorState().kinematics_estimated
+        current_pos_local = np.asarray([current_pos_state.position.x_val
+                                           , current_pos_state.position.y_val
+                                           , current_pos_state.position.z_val])
+        # print("now:"+str(current_pos_local))
+
+        camera_angle = self.calculate_camera_to_center(current_pos_local)
+        global g_current_orientation_pitch,g_current_orientation_roll,g_current_orientation_yaw
+        g_current_orientation_pitch = camera_angle[0]
+        g_current_orientation_roll = 0
+        g_current_orientation_yaw = camera_angle[2]-airsim.to_eularian_angles(current_pos_state.orientation)[2]
+        #g_current_orientation_yaw = camera_angle[2]
+
+        # log_file("camera",
+        #          v_identifier+":desired orientation:" + str(g_current_orientation_pitch) + ","
+        #          + str(g_current_orientation_yaw))
+
+        self.client.simSetCameraOrientation("front_center", airsim.to_quaternion(
+            g_current_orientation_pitch, g_current_orientation_roll, g_current_orientation_yaw))
+
+        # state = self.client.getMultirotorState()
+        # orientation = airsim.to_eularian_angles(state.kinematics_estimated.orientation)
+        # log_file("camera", v_identifier + ":camera after pitch:" + str(orientation[0]) + "," + str(orientation[2]))
+        #
+        # self.client.rotateToYawAsync(math.degrees(g_current_orientation_yaw), 5,margin=0).join()
+        #
+        # state = self.client.getMultirotorState()
+        # orientation = airsim.to_eularian_angles(state.kinematics_estimated.orientation)
+        # log_file("camera", v_identifier+":actual orientation:" + str(orientation[0]) + "," + str(orientation[2]))
+
+    def move_to_next(self, next_index, v_points):
+        state = self.client.getMultirotorState()
+        current_pos = np.asarray([state.kinematics_estimated.position.x_val
+                                     , state.kinematics_estimated.position.y_val
+                                     , state.kinematics_estimated.position.z_val])
+        log_file("move to:" + str(self.world_to_local(v_points[next_index])), "now:" + str(current_pos))
+        next_direction_local = self.world_to_local(v_points[next_index]) - current_pos
+        global g_current_velocity_x,g_current_velocity_y,g_current_velocity_z,g_next_duration
+        g_current_velocity_x = next_direction_local[0] / SPEED
+        g_current_velocity_y = next_direction_local[1] / SPEED
+        g_current_velocity_z = next_direction_local[2] / SPEED
+        g_next_duration = 1
+        # Debug
+        # next_pos=current_pos+g_next_duration*np.asarray([g_current_velocity_x,g_current_velocity_y,g_current_velocity_z])
+        # print("expected:"+str(next_pos))
+        # print("velocity:"+str(g_current_velocity_x)+"_"+str(g_current_velocity_y)+"_"+str(g_current_velocity_z)+"_")
+        self.client.moveByVelocityAsync(g_current_velocity_x
+                                        , g_current_velocity_y
+                                        , g_current_velocity_z
+                                        , g_next_duration
+                                        , airsim.DrivetrainType.ForwardOnly
+                                        , airsim.YawMode(False, 0)).join()
+
+    def prepare_start(self, v_id_route, v_index, v_points):
+        """
+            Data reporter
+            """
+        try:
+            self.reporter = open(os.path.join(self.reporter_dir, str(v_id_route) + "_" + str(v_index) + ".txt"), "w")
+        except Exception as e:
+            print(e)
+        """
+        Fly to first point
+        """
+        start_pos_local = self.world_to_local(v_points[0])
+        self.client.moveToPositionAsync(start_pos_local[0], start_pos_local[1], start_pos_local[2]
+                                        , SPEED).join()
+        # self.client.hoverAsync().join()
+        state = self.client.getMultirotorState()
+        current_pos = state.kinematics_estimated.position
+        log_file("Ready to start", "pos:"
+                 + str(current_pos.x_val) + "_"
+                 + str(current_pos.y_val) + "_"
+                 + str(current_pos.z_val))
 
     def finish(self):
         self.client.hoverAsync().join()
@@ -368,21 +298,34 @@ if __name__ == '__main__':
     # Client to send the pose data and point
     #_thread.start_new_thread(socket_client)
 
-
-
     # timer=Timer(1/FREQUENCY,socket_client,[s])
     # timer.start()
 
     #Server to receive current states and position
     # _thread.start_new_thread(socket_server)
 
-    airsim_demo = AirsimDemo(v_is_connect_simulator=False)
+    airsim_demo = AirsimDemo()
 
-    for idx, control_point in enumerate(calculate_path(START_POS, END_POS, END_NORM)):
-        if idx==4:
-            x, y, z = generateCurvePoint(control_point)
-            points = np.asarray([x, y, z]).T
+    # x=0-2000 y=700-2000 z=200-400 step=50
+    x,y,z=0,700,200
+    step=200
+    start_pos=[]
+    while x<=2000:
+        while y<=2000:
+            while z<=400:
+                start_pos.append(np.asarray([x, y, z]))
+                z+=step
+            y+=step
+            z=200
+        x+=step
+        y=700
+        z=200
+    for id_route,item in enumerate(start_pos):
+        for idx, control_point in enumerate(calculate_path(item, END_POS, END_NORM)):
+            if idx==4:
+                x, y, z = generateCurvePoint(control_point,item)
+                points = np.asarray([x, y, z]).T
 
-            airsim_demo.start(points, idx)
+                airsim_demo.start(points, idx,id_route)
 
     airsim_demo.finish()
