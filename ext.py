@@ -4,14 +4,18 @@ import numpy as np
 Parameters
 """
 
-START_POS = np.asarray([1500, 1500, 30])
-END_POS = np.asarray([700, 650, 150])
-END_NORM=np.asarray([0, 1, 0])
-CAMERA_CENTER = np.asarray([700, 510, 150])
-DRONE_START_POS = np.asarray([1500, 1500, 30])
+START_POS = np.asarray([600, -500, 112])
+END_POS = np.asarray([-900, 600, 220])
+END_NORM=np.asarray([1, 0, 0])
+CAMERA_CENTER = np.asarray([-900, 600, 220])
+DRONE_START_POS = START_POS
 SAMPLE_FREQUENCY=20
 
+ROUTE_START_POS=[-300,-1300,450]
+ROUTE_END_POS=[1100,1100,1050]
+ROUTE_STEP=200
 
+g_log_level=["move to","after moving","camera","process","debug"]
 """
 
 """
