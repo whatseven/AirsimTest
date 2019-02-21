@@ -164,7 +164,6 @@ class AirsimDemo:
             self.report_and_logging(identifier,image_filename)
             next_index += 1
 
-            log_file("process",identifier+" done")
 
         state = self.client.getMultirotorState()
 
@@ -314,16 +313,6 @@ class AirsimDemo:
 
 
 if __name__ == '__main__':
-
-    # Client to send the pose data and point
-    #_thread.start_new_thread(socket_client)
-
-    # timer=Timer(1/FREQUENCY,socket_client,[s])
-    # timer.start()
-
-    #Server to receive current states and position
-    # _thread.start_new_thread(socket_server)
-
     # Sample the route
     start_poses=[]
     x=np.linspace(ROUTE_START_POS[0],ROUTE_END_POS[0],(abs(ROUTE_END_POS[0]-ROUTE_START_POS[0]))/ROUTE_STEP).reshape((-1,1))
@@ -334,6 +323,9 @@ if __name__ == '__main__':
             for tx in x:
                 start_poses.append(np.asarray([tx,ty,tz]))
 
+    #
+    # Init the model
+    #
     airsim_demo = AirsimDemo()
 
     for id_route, start_pos in enumerate(start_poses):
@@ -341,7 +333,7 @@ if __name__ == '__main__':
         x, y, z = generateCurvePoint(control_point, start_pos)
         points = np.asarray([x, y, z]).T
         airsim_demo.start(points[0], id_route)
-
+        log_file("process",str(id_route)+"/"+str(len(start_poses)))
         # for idx, control_point in enumerate(calculate_path(start_pos, END_POS, END_NORM)):
         #     if idx==4:
         #         x, y, z = generateCurvePoint(control_point, start_pos)

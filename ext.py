@@ -13,12 +13,12 @@ SAMPLE_FREQUENCY=20
 
 ROUTE_START_POS=[-300,-1300,450]
 ROUTE_END_POS=[1100,1100,1050]
-ROUTE_STEP=200
+ROUTE_STEP=100
 
-g_log_level=["move to","after moving","camera","process","debug"]
-"""
+# g_log_level=["move to","after moving","camera","process","debug"]
+g_log_level=["process"]
 
-"""
+test_model_image_dir="./test_image"
 
 
 # debug
